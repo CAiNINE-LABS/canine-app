@@ -196,7 +196,6 @@ function startVoice() {
 }
 function stopVoice() { listening = false; try { rec && rec.stop(); } catch (e) {} $('voiceBtn').textContent = '🎙 Voice: off'; }
 $('voiceBtn').onclick = () => {
-  if (SR) { listening ? stopVoice() : startVoice(); return; }
   $('heard').textContent = 'Voice runs on the device itself (firmware v0.2+). Say "Hey Lola, come", "Lola wait", "Lola down", "Good girl" or "Okay Lola". Heard commands show up in the log.';
 };
 $('clearLog').onclick = () => { log = []; try { localStorage.removeItem('cainine_log'); } catch (e) {} renderLog(); };
