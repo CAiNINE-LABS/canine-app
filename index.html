@@ -54,7 +54,7 @@
       <button data-cmd="yes" class="cue primary">Yes!</button>
     </div>
     <div class="row" style="margin-top:10px">
-      <button id="voiceBtn" class="small">🎙 Voice: off</button>
+      <button id="voiceBtn" class="small">🎙 Voice help</button>
       <button data-cmd="stop" class="cue small">Release</button>
     </div>
     <div id="heard" class="heard"></div>
@@ -158,7 +158,9 @@ function onState(ev) {
   $('bat').textContent = (s.b >= 0 ? s.b + '%' : '–');
   if (s.t >= 0) $('posture').textContent = s.p + ' (' + s.t + '°)';
   if (s.e) {
-    const map = { wait_ok: 'Wait success! Goal goes up', wait_broke: 'Lola moved, hold restarted', down_ok: 'Down confirmed', down_timeout: 'Down not confirmed', calibrated: 'Posture calibrated' };
+    const map = { wait_ok: 'Wait success! Goal goes up', wait_broke: 'Lola moved, hold restarted', down_ok: 'Down confirmed', down_timeout: 'Down not confirmed', calibrated: 'Posture calibrated',
+      voice_come: 'Heard on device: "Come"', voice_wait: 'Heard on device: "Wait"', voice_down: 'Heard on device: "Down"',
+      voice_yes: 'Heard on device: "Good girl"', voice_stop: 'Heard on device: "Release"' };
     addLog(map[s.e] || s.e);
   }
 }
@@ -193,7 +195,10 @@ function startVoice() {
   catch (e) { msg('Could not start voice: ' + e.message); }
 }
 function stopVoice() { listening = false; try { rec && rec.stop(); } catch (e) {} $('voiceBtn').textContent = '🎙 Voice: off'; }
-$('voiceBtn').onclick = () => listening ? stopVoice() : startVoice();
+$('voiceBtn').onclick = () => {
+  if (SR) { listening ? stopVoice() : startVoice(); return; }
+  $('heard').textContent = 'Voice runs on the device itself (firmware v0.2+). Say "Hey Lola, come", "Lola wait", "Lola down", "Good girl" or "Okay Lola". Heard commands show up in the log.';
+};
 $('clearLog').onclick = () => { log = []; try { localStorage.removeItem('cainine_log'); } catch (e) {} renderLog(); };
 </script>
 </body>
