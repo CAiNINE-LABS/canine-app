@@ -116,20 +116,46 @@ async function connect() {
   msg('');
   if (!navigator.bluetooth) { msg('Bluetooth is not available here. Open this page in the Bluefy app.'); return; }
   let step = 'pick device';
+  const errText = e => (e && (e.message || e.name)) || String(e);
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  // Look up both characteristics; fall back to listing all of them (works around Bluefy lookup bugs).
+  async function findChars(server) {
+    step = 'find service'; const svc = await server.getPrimaryService(SVC);
+    step = 'find command';
+    try {
+      return [await svc.getCharacteristic(CMD), await svc.getCharacteristic(STATE)];
+    } catch (e1) {
+      step = 'list parts';
+      const all = await svc.getCharacteristics();
+      const ids = all.map(c => String(c.uuid).toLowerCase());
+      const c = all[ids.indexOf(CMD)], s = all[ids.indexOf(STATE)];
+      if (!c || !s) throw new Error('found ' + all.length + ' parts: ' + ids.map(u => u.slice(4, 8)).join(',') + ' (first error: ' + errText(e1) + ')');
+      return [c, s];
+    }
+  }
   try {
     device = await navigator.bluetooth.requestDevice({ filters: [{ namePrefix: 'CAiNINE' }], optionalServices: [SVC] });
     device.addEventListener('gattserverdisconnected', onDisconnect);
-    step = 'connect';      const server = await device.gatt.connect();
-    step = 'find service'; const svc = await server.getPrimaryService(SVC);
-    step = 'find command'; cmdChar = await svc.getCharacteristic(CMD);
-    step = 'find state';   const st = await svc.getCharacteristic(STATE);
+    step = 'connect';      let server = await device.gatt.connect();
+    let chars;
+    try { chars = await findChars(server); }
+    catch (e) {
+      // One retry with a fresh connection.
+      addLog('Retrying (' + step + ': ' + errText(e) + ')');
+      try { device.gatt.disconnect(); } catch (_) {}
+      await sleep(1000);
+      step = 'reconnect'; server = await device.gatt.connect();
+      await sleep(500);
+      chars = await findChars(server);
+    }
+    cmdChar = chars[0]; const st = chars[1];
     st.addEventListener('characteristicvaluechanged', onState);
     step = 'start data';   await st.startNotifications();
     $('conn').textContent = 'Connected: ' + device.name; $('conn').classList.add('on');
     $('connectBtn').textContent = 'Disconnect';
     addLog('Connected to ' + device.name);
   } catch (e) {
-    msg('Failed at "' + step + '": ' + (e && (e.message || e.name) || String(e)));
+    msg('Failed at "' + step + '": ' + errText(e));
     try { device && device.gatt.connected && device.gatt.disconnect(); } catch (_) {}
   }
 }
