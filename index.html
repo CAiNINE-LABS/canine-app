@@ -115,19 +115,23 @@ renderLog();
 async function connect() {
   msg('');
   if (!navigator.bluetooth) { msg('Bluetooth is not available here. Open this page in the Bluefy app.'); return; }
+  let step = 'pick device';
   try {
     device = await navigator.bluetooth.requestDevice({ filters: [{ namePrefix: 'CAiNINE' }], optionalServices: [SVC] });
     device.addEventListener('gattserverdisconnected', onDisconnect);
-    const server = await device.gatt.connect();
-    const svc = await server.getPrimaryService(SVC);
-    cmdChar = await svc.getCharacteristic(CMD);
-    const st = await svc.getCharacteristic(STATE);
+    step = 'connect';      const server = await device.gatt.connect();
+    step = 'find service'; const svc = await server.getPrimaryService(SVC);
+    step = 'find command'; cmdChar = await svc.getCharacteristic(CMD);
+    step = 'find state';   const st = await svc.getCharacteristic(STATE);
     st.addEventListener('characteristicvaluechanged', onState);
-    await st.startNotifications();
+    step = 'start data';   await st.startNotifications();
     $('conn').textContent = 'Connected: ' + device.name; $('conn').classList.add('on');
     $('connectBtn').textContent = 'Disconnect';
     addLog('Connected to ' + device.name);
-  } catch (e) { msg('Could not connect: ' + e.message); }
+  } catch (e) {
+    msg('Failed at "' + step + '": ' + (e && (e.message || e.name) || String(e)));
+    try { device && device.gatt.connected && device.gatt.disconnect(); } catch (_) {}
+  }
 }
 function onDisconnect() {
   cmdChar = null; $('conn').textContent = 'Not connected'; $('conn').classList.remove('on');
