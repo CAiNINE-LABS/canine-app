@@ -34,7 +34,7 @@
 </head>
 <body>
   <h1>CAi<span>NINE</span></h1>
-  <div class="sub">Training with Lola · v0.1</div>
+  <div class="sub">Training with Lola · v0.3</div>
 
   <div class="card row">
     <div>
@@ -79,6 +79,21 @@
     <div class="row"><div class="label">Posture: <span id="posture">calibrate first</span></div>
       <button data-cmd="cal" class="cue small">Calibrate</button></div>
     <div class="label">Calibrate while Lola stands still with the device on.</div>
+  </div>
+
+  <div class="card">
+    <div class="row"><div class="label">Bathroom · tag what she just did</div><span class="pill" id="bathCounts">Pee 0 · Poop 0</span></div>
+    <div class="grid" style="grid-template-columns:repeat(3,minmax(0,1fr))">
+      <button class="bl" data-l="pee">💧 Pee</button>
+      <button class="bl" data-l="poop">💩 Poop</button>
+      <button class="bl" data-l="other">Other</button>
+    </div>
+    <div class="label" style="margin-top:8px">Tap right after she finishes. "Other" = the stick flagged a squat that wasn't (e.g. a sit).</div>
+    <div id="bathList" style="font-size:13px;color:var(--muted);line-height:1.6;max-height:200px;overflow:auto"></div>
+    <div class="row" style="margin-top:8px">
+      <button id="bathExport" class="small">Export data</button>
+      <button id="bathClear" class="small">Clear</button>
+    </div>
   </div>
 
   <div class="card">
@@ -154,6 +169,7 @@ async function connect() {
     $('conn').textContent = 'Connected: ' + device.name; $('conn').classList.add('on');
     $('connectBtn').textContent = 'Disconnect';
     addLog('Connected to ' + device.name);
+    setTimeout(() => send('bsync'), 800);   // pull bathroom events the stick saw while disconnected
   } catch (e) {
     msg('Failed at "' + step + '": ' + errText(e));
     try { device && device.gatt.connected && device.gatt.disconnect(); } catch (_) {}
@@ -165,7 +181,7 @@ function onDisconnect() {
 }
 $('connectBtn').onclick = () => { if (device && device.gatt.connected) device.gatt.disconnect(); else connect(); };
 
-const names = { come: 'Come', wait: 'Wait', down: 'Down', yes: 'Yes', stop: 'Release', cal: 'Calibrated', reset: 'Goal reset', testtone: 'Test sound', testvib: 'Test buzz' };
+const names = { come: 'Come', wait: 'Wait', down: 'Down', yes: 'Yes', stop: 'Release', cal: 'Calibrated', reset: 'Goal reset', testtone: 'Test sound', testvib: 'Test buzz', 'bl:pee': 'Tag: pee', 'bl:poop': 'Tag: poop', 'bl:other': 'Tag: other', bsync: 'Synced bathroom events' };
 async function send(cmd, via) {
   if (!cmdChar) { msg('Connect to the device first.'); return; }
   try {
@@ -178,6 +194,7 @@ document.querySelectorAll('.cue').forEach(b => b.onclick = () => send(b.dataset.
 let lastEvt = '';
 function onState(ev) {
   let s; try { s = JSON.parse(new TextDecoder().decode(ev.target.value)); } catch (e) { return; }
+  if (s.bx !== undefined) { onBath(s); return; }
   const pct = Math.min(100, (s.m / 0.3) * 100);
   $('motionBar').style.width = pct + '%';
   $('motionBar').style.background = s.s ? 'var(--ok)' : 'var(--warn)';
@@ -238,6 +255,47 @@ $('voiceToggle').onclick = () => {
   $('voiceToggle').textContent = 'Device voice: ' + (devVoice ? 'on' : 'off (saves battery)');
 };
 $('clearLog').onclick = () => { log = []; try { localStorage.removeItem('cainine_log'); } catch (e) {} renderLog(); };
+
+// ---------- Bathroom events ----------
+let bath = [];
+try { bath = JSON.parse(localStorage.getItem('cainine_bath') || '[]'); } catch (e) { bath = []; }
+function saveBath() { try { localStorage.setItem('cainine_bath', JSON.stringify(bath)); } catch (e) {} }
+function onBath(s) {
+  const ts = Date.now() - s.ago * 1000;
+  // Same event = same id from the stick within ~15 s of the stored time (ids restart when it reboots)
+  let row = bath.find(r => r.id === s.bx && Math.abs(r.ts - ts) < 15000);
+  const isNew = !row;
+  if (!row) { row = { id: s.bx, ts }; bath.push(row); }
+  Object.assign(row, { src: s.src, guess: s.k, label: s.l || row.label || '', dur: s.d, maxTilt: s.mt,
+    gx: s.g[0], gy: s.g[1], gz: s.g[2], rot: s.rot, motion: s.mo });
+  saveBath(); renderBath();
+  if (isNew && s.src === 'a' && !s.l) addLog('Squat detected (' + (s.d / 1000).toFixed(0) + 's) — looks like ' + s.k + '. Tag it!');
+  if (s.l) addLog('Tagged ' + s.l + (s.src === 'm' ? ' (stick missed it, saved anyway)' : ''));
+}
+function renderBath() {
+  const pee = bath.filter(r => r.label === 'pee').length, poop = bath.filter(r => r.label === 'poop').length;
+  $('bathCounts').textContent = 'Pee ' + pee + ' · Poop ' + poop;
+  $('bathList').innerHTML = bath.slice(-12).reverse().map(r => {
+    const t = new Date(r.ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    const what = r.label ? '<b style="color:var(--text)">' + r.label + '</b>' : 'untagged (guess: ' + r.guess + ')';
+    return t + ' · ' + what + ' · ' + (r.dur / 1000).toFixed(0) + 's · tilt ' + r.maxTilt + '°';
+  }).join('<br>');
+}
+renderBath();
+document.querySelectorAll('.bl').forEach(b => b.onclick = () => send('bl:' + b.dataset.l, 'tag'));
+$('bathExport').onclick = async () => {
+  const cols = ['time', 'label', 'guess', 'source', 'duration_s', 'max_tilt_deg', 'gx', 'gy', 'gz', 'turned_deg', 'motion'];
+  const csv = [cols.join(',')].concat(bath.map(r => [new Date(r.ts).toISOString(), r.label, r.guess, r.src === 'm' ? 'missed' : 'auto',
+    (r.dur / 1000).toFixed(1), r.maxTilt, r.gx, r.gy, r.gz, r.rot, r.motion].join(','))).join('\n');
+  try { if (navigator.share) { await navigator.share({ title: 'CAiNINE bathroom data', text: csv }); return; } } catch (e) {}
+  try { await navigator.clipboard.writeText(csv); msg('Copied ' + bath.length + ' rows — paste them to Claude.'); }
+  catch (e) { msg('Could not copy; long-press the list instead.'); }
+};
+let clearArmed = false;   // two taps to clear, so a stray tap can't wipe a week of data
+$('bathClear').onclick = () => {
+  if (!clearArmed) { clearArmed = true; $('bathClear').textContent = 'Tap again to clear'; setTimeout(() => { clearArmed = false; $('bathClear').textContent = 'Clear'; }, 3000); return; }
+  bath = []; saveBath(); renderBath(); clearArmed = false; $('bathClear').textContent = 'Clear';
+};
 </script>
 </body>
 </html>
